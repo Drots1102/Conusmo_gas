@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from matplotlib.pyplot import legend
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
@@ -32,6 +31,13 @@ def carga_datos(tipo,fecha_inicio,fecha_final,table,redownload):
     return datos
 
 #-----------------------------------------------------------------------------------------------------------------------
+def conversion_energia(df_byc,df_pisos):
+
+    diario_byc = calcular_consumo_diario(df_byc)
+    diario_pisos = calcular_consumo_diario(df_pisos)
+
+    energia_byc = ()
+#-----------------------------------------------------------------------------------------------------------------------
 def calcular_consumo_diario(df):
     """
     Calcula el consumo diario a partir de un DataFrame con volumen acumulativo,
@@ -46,21 +52,25 @@ def calcular_consumo_diario(df):
     df = df.copy()
     df["fecha"] = pd.to_datetime(df["fecha"])
 
-    # Crear columna de día 6am-6am
+    # Ajustar el día para que empiece a las 6:30 a.m.
     df["fecha_ajustada"] = df["fecha"].apply(
-        lambda x: x.date() if x.hour >= 6 else (x - pd.Timedelta(days=1)).date()
+        lambda x: x.date() if x.hour > 6 or (x.hour == 6 and x.minute >= 30)
+        else (x - pd.Timedelta(days=1)).date()
     )
 
-    # Calcular consumo diario: último - primero de cada día ajustado
+    # Calcular consumo diario como diferencia entre último y primero del día ajustado
     consumo_diario = df.groupby("fecha_ajustada").agg(
         vol_dias=("vol_corregido", lambda x: x.iloc[-1] - x.iloc[0])
     ).reset_index()
 
+    # Añadir etiquetas para gráficos
     consumo_diario["fecha"] = pd.to_datetime(consumo_diario["fecha_ajustada"])
     consumo_diario["fecha_label"] = consumo_diario["fecha"].dt.strftime("%d-%m")
-    print(consumo_diario)
 
+    print(consumo_diario)
     return consumo_diario
+
+
 #-----------------------------------------------------------------------------------------------------------------------
 
 def calcular_consumo_diario_promedio(df):
@@ -82,31 +92,14 @@ def calcular_consumo_diario_promedio(df):
         lambda x: x.date() if x.hour >= 6 else (x - pd.Timedelta(days=1)).date()
     )
 
-    # Count records per adjusted date
-    records_per_day = df.groupby("fecha_ajustada").size().reset_index(name='count')
-
     # Calcular consumo diario: último - primero de cada día ajustado
     consumo_diario = df.groupby("fecha_ajustada").agg(
         vol_dias=("vol_corregido", lambda x: x.iloc[-1] - x.iloc[0])
     ).reset_index()
 
-    # Merge count information
-    consumo_diario = consumo_diario.merge(records_per_day, on="fecha_ajustada")
-
     consumo_diario["fecha"] = pd.to_datetime(consumo_diario["fecha_ajustada"])
     consumo_diario["fecha_label"] = consumo_diario["fecha"].dt.strftime("%d-%m")
-    consumo_diario["DiaSemana"] = consumo_diario["fecha"].dt.day_name()
-
-
-    if not consumo_diario.empty and consumo_diario.iloc[-1]['count'] < 3:
-        consumo_diario = consumo_diario.iloc[:-1]
-
-    # Drop the count column as it was only used for filtering
-    if 'count' in consumo_diario.columns:
-        consumo_diario = consumo_diario.drop('count', axis=1)
-
     return consumo_diario
-
 
 def calcular_salud(df, fecha_inicio, fecha_fin):
     """
@@ -352,7 +345,11 @@ def fluctuacion(df_byc, df_pisos, df_erm, df_interno, df_horno, titulo="", key=N
 
     # Calcular la diferencia para detectar fluctuaciones
     for df in [df_byc, df_pisos, df_erm, df_interno, df_horno]:
+        # Calcular la diferencia entre vol_corregido
         df["diferencia"] = df["vol_corregido"].diff().fillna(0)
+
+        # Eliminar filas duplicadas basadas en la columna "fecha_ajustada"
+        df.drop_duplicates(subset="fecha", keep="first", inplace=True)
 
     fig = go.Figure()
 
@@ -504,14 +501,7 @@ def promedio_media_hora(dataframes, titulo,key=None):
 
     st.plotly_chart(fig,key=key)
 
-
-# Filtrar los datos por el rango de fecha ------------------------------------------------------------------------------------------------------------
-def filtrar(df):
-    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")  # Convertir a datetime
-    return df[(df["fecha"] >= pd.to_datetime(fecha_inicio)) & (df["fecha"] <= pd.to_datetime(fecha_final))]
-
-# --------------------------------------------------------------------------------------------------------------------
-
+#------------------------------------------------------------------------------------------------------
 
 def promedio_semana(df, nombre):
     """
@@ -744,7 +734,6 @@ def generar_graficos_promedios(df_byc_dia, df_pisos_dia, df_horno_dia, df_erm_di
             "ERM": df_erm_dia["vol_dias"].sum() / (diferencia_dias + 1 ),
             "Interno": df_interno_dia["vol_dias"].sum() / (diferencia_dias + 1 ),
         }
-    print(diferencia_dias)
     # Gráfico 1: Promedios Diarios por Planta
     fig1 = go.Figure([
         go.Bar(
@@ -855,8 +844,8 @@ def temperatura_presion(df, titulo, key=None):
 
 def mostrar_tabs(data, fecha_inicio, fecha_final, tipo):
     # Tabs --------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        [" 🔬Análisis", " ⚖️Comparaciones", " ⏳ Consumo por Hora", " 📉Fluctuación"," 🔥Temperatura y Presión",
+    tab1, tab2, tab3, tab4, tab5, tab6,tab7 = st.tabs(
+        [" ⚡ Indice energetico"," 🔬Análisis", " ⚖️Comparaciones", " ⏳ Consumo por Hora", " 📉Fluctuación"," 🔥Temperatura y Presión",
          " 🧩Dataframes"])
 
     df_byc = data["byc"]
@@ -870,8 +859,18 @@ def mostrar_tabs(data, fecha_inicio, fecha_final, tipo):
     df_interno_dia = data["interno_dia"]
     df_horno_dia = data["horno_dia"]
 
-    # tab 1 -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
     with tab1:
+        st.title("M³ ➟ Energia")
+        st.divider()
+        st.warning("En Producción")
+
+
+    # tab 1 -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    with tab2:
         dataframes = {
             "Baños y Cocina": df_byc,
             "PyP": df_pisos,
@@ -879,7 +878,6 @@ def mostrar_tabs(data, fecha_inicio, fecha_final, tipo):
             "Interno": df_interno,
             "Horno 5": df_horno
         }
-
         st.title("Consumos")
         st.subheader("Consumo Mensual")
         st.plotly_chart(generar_grafico_total(df_byc, df_pisos, fecha_inicio, fecha_final))
@@ -904,7 +902,7 @@ def mostrar_tabs(data, fecha_inicio, fecha_final, tipo):
         st.plotly_chart(fig)
 
     # tab 2 --------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    with tab2:
+    with tab3:
         st.divider()
         st.subheader("Comparación de Días de Semana")
         if 'comparacion' not in st.session_state:
@@ -929,22 +927,22 @@ def mostrar_tabs(data, fecha_inicio, fecha_final, tipo):
                 comparar_semanas(df_horno, 'Comparación de Semanas de Horno 5')
 
     # tab 3 ------------------------------------------------------- Gráfico del promedio por hora --------------------------------------------------------------------------------------
-    with tab3:
+    with tab4:
         st.title("Consumo por Hora")
         promedio_media_hora(dataframes, "Promedio por Hora de Consumo de Gas")
 
     # tab 4 ------------------------------------------------------ Fluctuación --------------------------------------------------------------------------------------------------
-    with tab4:
+    with tab5:
         st.title("Fluctuación en el Consumo de Gas")
         fluctuacion(df_byc, df_pisos, df_erm, df_interno, df_horno, "Gráfica de Fluctuación")
 
     # tab 5 --------------------------------------------------------- Temperatura y Presión ----------------------------------------------------------------------------------------------------------------
-    with tab5:
+    with tab6:
         temperatura_presion(df_interno, "Gráfica de Temperatura y Presión del Medidor Interno")
         temperatura_presion(df_erm, "Gráfica de Temperatura y Presión del Medidor ERM")
 
     # tab 6 --------------------------------------------------------- Dataframes ----------------------------------------------------------------------------------------------------------------
-    with tab6:
+    with tab7:
         st.title("Dataframes")
         st.divider()
         st.header("Dataframes importados")
