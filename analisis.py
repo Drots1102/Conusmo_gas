@@ -12,17 +12,6 @@ from datos import procesar_datos
 # Configurar estilo de página ------------------------------------------------------------------------------------------
 st.set_page_config(page_title="Análisis de Consumo de Gas", layout="wide", )
 
-# Definir las rutas de los archivos -----------------------------------------------------------------------------------
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),"data"))
-ruta_erm, ruta_interno, ruta_horno = [
-    os.path.join(BASE_DIR, file) for file in ["ERM.csv", "INT.csv", "H5.csv"]
-
-]
-
-
-
-
-
 #-----------------------------------------------------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def carga_datos(tipo,fecha_inicio,fecha_final,table,redownload):
@@ -31,12 +20,13 @@ def carga_datos(tipo,fecha_inicio,fecha_final,table,redownload):
     return datos
 
 #-----------------------------------------------------------------------------------------------------------------------
-def conversion_energia(df_byc,df_pisos):
+def conversion_energia(df):
 
-    diario_byc = calcular_consumo_diario(df_byc)
-    diario_pisos = calcular_consumo_diario(df_pisos)
+    diario_byc = calcular_consumo_diario(df)
+    temp_promedio= df["temperatura"].mean()
+    presion_promedio=df["presion"].mean()
 
-    energia_byc = ()
+
 #-----------------------------------------------------------------------------------------------------------------------
 def calcular_consumo_diario(df):
     """
